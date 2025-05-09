@@ -1,12 +1,31 @@
 <!DOCTYPE html>
-<html>
+<html lang="ms">
 <head>
-  <title>Feed</title>
-  <script type="module" src="js/feed.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Feed | JomSembang</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <h2>Senarai Pos</h2>
-  <div id="postList"></div>
-  <a href="create-post.html">+ Buat Pos Baru</a>
+  <header>
+    <h1>JomSembang</h1>
+    <button id="logout-btn">Log Keluar</button>
+  </header>
+
+  <main>
+    <section id="new-post">
+      <form id="post-form">
+        <textarea id="post-content" placeholder="Apa yang anda fikirkan?" required></textarea>
+        <button type="submit">Hantar</button>
+      </form>
+    </section>
+
+    <section id="feed">
+      <!-- Posts akan muncul di sini -->
+    </section>
+  </main>
+
+  <script type="module" src="firebase-config.js"></script>
+  <script type="module" src="feed.js"></script>
 </body>
 </html>
