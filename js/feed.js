@@ -1,73 +1,111 @@
-import { firebaseConfig } from "../firebase-config.js";
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { auth, db } from "./firebase-config.js";
 import {
-  getFirestore,
-  collection,
-  query,
-  orderBy,
-  getDocs,
-  getCountFromServer,
-  doc,
-  setDoc
-} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-import {
-  getAuth,
-  onAuthStateChanged
+  onAuthStateChanged,
+  signOut
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import {
+  collection,
+  addDoc,
+  getDocs,
+  orderBy,
+  query,
+  serverTimestamp,
+  onSnapshot,
+  doc,
+  updateDoc,
+  arrayUnion
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-// Init Firebase
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-const auth = getAuth(app);
-
-// Semak login
+// Semak sama ada pengguna login
 onAuthStateChanged(auth, (user) => {
-  if (user) {
-    loadPosts(user);
-  } else {
+  if (!user) {
     window.location.href = "index.html";
   }
 });
 
-// Fungsi muatkan pos
-async function loadPosts(user) {
-  const postList = document.getElementById("postList");
-  const q = query(collection(db, "posts"), orderBy("timestamp", "desc"));
-  const snapshot = await getDocs(q);
+const postForm = document.getElementById("post-form");
+const postContent = document.getElementById("post-content");
+const feed = document.getElementById("feed");
+const logoutBtn = document.getElementById("logout-btn");
 
-  for (const docSnap of snapshot.docs) {
-    const data = docSnap.data();
+// Logout
+logoutBtn.addEventListener("click", async () => {
+  await signOut(auth);
+  window.location.href = "index.html";
+});
+
+// Hantar post baru
+postForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const content = postContent.value.trim();
+  if (!content) return;
+
+  try {
+    await addDoc(collection(db, "posts"), {
+      content,
+      author: auth.currentUser.email,
+      timestamp: serverTimestamp(),
+      comments: []
+    });
+    postContent.value = "";
+  } catch (error) {
+    alert("Ralat: " + error.message);
+  }
+});
+
+// Papar semua post secara langsung
+const q = query(collection(db, "posts"), orderBy("timestamp", "desc"));
+onSnapshot(q, (snapshot) => {
+  feed.innerHTML = "";
+  snapshot.forEach((docSnap) => {
+    const post = docSnap.data();
     const postId = docSnap.id;
-
-    // Ambil bilangan like
-    const likeRef = collection(db, "posts", postId, "likes");
-    const likeSnap = await getCountFromServer(likeRef);
-    const likeCount = likeSnap.data().count;
-
     const postDiv = document.createElement("div");
-    postDiv.style.border = "1px solid #ccc";
-    postDiv.style.padding = "10px";
-    postDiv.style.margin = "10px 0";
+    postDiv.classList.add("post");
 
     postDiv.innerHTML = `
-      <p><strong>${data.author}</strong></p>
-      <p>${data.content || ""}</p>
-      ${data.imageUrl ? `<img src="${data.imageUrl}" style="max-width:100%;">` : ""}
-      <p>
-        <button data-id="${postId}">Like</button>
-        <span>${likeCount} suka</span>
-      </p>
-      <small>${data.timestamp?.toDate().toLocaleString() || ""}</small>
+      <p><strong>${post.author}</strong></p>
+      <p>${post.content}</p>
+      <div class="comments">
+        ${(post.comments || [])
+          .map(
+            (c) =>
+              `<p><strong>${c.author}:</strong> ${c.text}</p>`
+          )
+          .join("")}
+        <form class="comment-form" data-id="${postId}">
+          <input type="text" placeholder="Tulis komen..." required />
+          <button type="submit">Komen</button>
+        </form>
+      </div>
     `;
+    feed.appendChild(postDiv);
+  });
+});
 
-    // Butang Like
-    const likeBtn = postDiv.querySelector("button");
-    likeBtn.addEventListener("click", async () => {
-      const likeDoc = doc(db, "posts", postId, "likes", user.uid);
-      await setDoc(likeDoc, { liked: true });
-      location.reload(); // Refresh untuk update kiraan like
+// Tambah komen
+feed.addEventListener("submit", async (e) => {
+  if (!e.target.classList.contains("comment-form")) return;
+  e.preventDefault();
+
+  const form = e.target;
+  const input = form.querySelector("input");
+  const commentText = input.value.trim();
+  if (!commentText) return;
+
+  const postId = form.getAttribute("data-id");
+  const postRef = doc(db, "posts", postId);
+
+  try {
+    await updateDoc(postRef, {
+      comments: arrayUnion({
+        text: commentText,
+        author: auth.currentUser.email,
+        timestamp: new Date().toISOString()
+      })
     });
-
-    postList.appendChild(postDiv);
+    input.value = "";
+  } catch (error) {
+    alert("Gagal tambah komen: " + error.message);
   }
-}
+});
