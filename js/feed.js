@@ -1,103 +1,102 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, collection, addDoc, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { db, auth } from "./js/firebase-config.js";
+import {
+  collection,
+  query,
+  orderBy,
+  onSnapshot,
+  doc,
+  getDoc,
+  updateDoc,
+  addDoc,
+  serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
-// Firebase config
-const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_AUTH_DOMAIN",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_BUCKET",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
-};
+const feedEl = document.getElementById("feed");
+const logoutBtn = document.getElementById("logout");
 
-// Init Firebase
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-const auth = getAuth(app);
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    const postsRef = collection(db, "posts");
+    const q = query(postsRef, orderBy("timestamp", "desc"));
 
-// Elemen UI
-const postForm = document.getElementById("post-form");
-const postContent = document.getElementById("post-content");
-const feed = document.getElementById("feed");
+    onSnapshot(q, (snapshot) => {
+      feedEl.innerHTML = "";
+      snapshot.forEach((docSnap) => {
+        const post = docSnap.data();
+        const postId = docSnap.id;
+        const isLiked = post.likes?.includes(user.email);
+        const likeText = `${isLiked ? "Unlike" : "Like"} (${post.likes?.length || 0})`;
 
-// Auth check
-onAuthStateChanged(auth, user => {
-  if (!user) {
-    window.location.href = "index.html";
-  } else {
-    loadPosts(user);
-    postForm.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const content = postContent.value.trim();
-      if (content) {
-        await addDoc(collection(db, "posts"), {
-          content,
-          timestamp: new Date(),
-          author: user.email
+        const postEl = document.createElement("div");
+        postEl.classList.add("post");
+        postEl.innerHTML = `
+          <p><strong>${post.author}</strong></p>
+          <p>${post.content}</p>
+          <p><small>${new Date(post.timestamp?.toDate()).toLocaleString()}</small></p>
+          <button class="like-btn" data-id="${postId}">${likeText}</button>
+          <div class="comments" id="comments-${postId}"></div>
+          <form class="comment-form" data-id="${postId}">
+            <input type="text" placeholder="Tulis komen..." required />
+            <button type="submit">Hantar</button>
+          </form>
+        `;
+        feedEl.appendChild(postEl);
+
+        // Papar komen
+        const commentsEl = document.getElementById(`comments-${postId}`);
+        (post.comments || []).forEach((comment) => {
+          const commentEl = document.createElement("p");
+          commentEl.innerHTML = `<small><strong>${comment.author}</strong>: ${comment.text}</small>`;
+          commentsEl.appendChild(commentEl);
         });
-        postContent.value = "";
-      }
-    });
-  }
-});
-
-// Load posts & listen live
-function loadPosts(currentUser) {
-  const postsQuery = query(collection(db, "posts"), orderBy("timestamp", "desc"));
-  onSnapshot(postsQuery, (snapshot) => {
-    feed.innerHTML = "";
-    snapshot.forEach((doc) => {
-      const post = doc.data();
-      const postId = doc.id;
-      const postEl = document.createElement("div");
-      postEl.classList.add("post");
-      postEl.innerHTML = `
-        <p><strong>${post.author}</strong><br>${post.content}</p>
-        <div class="comments" id="comments-${postId}"></div>
-        <form class="comment-form" data-id="${postId}">
-          <input type="text" placeholder="Tulis komen..." required />
-          <button type="submit">Komen</button>
-        </form>
-      `;
-      feed.appendChild(postEl);
-
-      // Load komen
-      loadComments(postId);
-
-      // Submit komen
-      const commentForm = postEl.querySelector(".comment-form");
-      commentForm.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const input = commentForm.querySelector("input");
-        const comment = input.value.trim();
-        if (comment) {
-          await addDoc(collection(db, `posts/${postId}/comments`), {
-            comment,
-            author: currentUser.email,
-            timestamp: new Date()
-          });
-          input.value = "";
-        }
       });
     });
-  });
-}
 
-// Load comments
-function loadComments(postId) {
-  const commentsRef = collection(db, `posts/${postId}/comments`);
-  const commentsQuery = query(commentsRef, orderBy("timestamp", "asc"));
-  const commentsEl = document.getElementById(`comments-${postId}`);
-
-  onSnapshot(commentsQuery, (snapshot) => {
-    commentsEl.innerHTML = "";
-    snapshot.forEach((doc) => {
-      const data = doc.data();
-      const p = document.createElement("p");
-      p.innerHTML = `<strong>${data.author}</strong>: ${data.comment}`;
-      commentsEl.appendChild(p);
+    // Like/unlike handler
+    feedEl.addEventListener("click", async (e) => {
+      if (e.target.classList.contains("like-btn")) {
+        const postId = e.target.dataset.id;
+        const postRef = doc(db, "posts", postId);
+        const snap = await getDoc(postRef);
+        const likes = snap.data().likes || [];
+        const updatedLikes = likes.includes(user.email)
+          ? likes.filter((email) => email !== user.email)
+          : [...likes, user.email];
+        await updateDoc(postRef, { likes: updatedLikes });
+      }
     });
-  });
-}
+
+    // Comment handler
+    feedEl.addEventListener("submit", async (e) => {
+      if (e.target.classList.contains("comment-form")) {
+        e.preventDefault();
+        const postId = e.target.dataset.id;
+        const input = e.target.querySelector("input");
+        const commentText = input.value.trim();
+        if (!commentText) return;
+
+        const postRef = doc(db, "posts", postId);
+        const postSnap = await getDoc(postRef);
+        const oldComments = postSnap.data().comments || [];
+        const newComment = {
+          text: commentText,
+          author: user.email,
+          timestamp: new Date().toISOString()
+        };
+
+        await updateDoc(postRef, { comments: [...oldComments, newComment] });
+        input.value = "";
+      }
+    });
+
+    // Logout
+    logoutBtn.addEventListener("click", () => {
+      signOut(auth).then(() => {
+        window.location.href = "login.html";
+      });
+    });
+  } else {
+    window.location.href = "login.html";
+  }
+});
